@@ -1,6 +1,6 @@
 """
 Kokoro TTS 服务
-支持 OpenAI 兼容 API + 自定义音素输入
+支持 OpenAI 兼容 API + 自定义音素输入 + 权威音节数查询
 """
 import os
 import io
@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from kokoro import KPipeline
+import pronouncing
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -143,6 +144,19 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy", "model": "Kokoro-82M"}
+
+@app.get("/syllable-count/{word}")
+def syllable_count(word: str):
+    """基于 CMU 词典返回权威音节数（通过 stresses 字符串长度计算）"""
+    stresses = pronouncing.stresses_for_word(word.lower())
+    if not stresses:
+        raise HTTPException(status_code=404, detail=f"Word '{word}' not found in CMU dictionary")
+    # stresses 字符串每个字符是一个音节的重音标记，长度 = 音节数
+    return {
+        "word": word,
+        "syllable_count": len(stresses[0]),
+        "stresses": stresses[0],
+    }
 
 @app.get("/voices")
 def list_voices():

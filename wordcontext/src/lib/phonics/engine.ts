@@ -38,40 +38,36 @@ function parseArpabet(arpabetStr: string): Phoneme[] {
 
 /**
  * 基于 CMU 词典音素数量推断音节划分
- * 优先使用 CMU 真实数据，对于 CMU 没有的词使用均衡分配启发式
+ * 优先从 TTS 服务获取权威音节数，非 CMU 词使用均衡分配启发式
  */
-function syllabify(word: string, cmuArpabet?: string): string[] {
+async function syllabify(word: string, cmuArpabet?: string): Promise<string[]> {
   const w = word.toLowerCase();
   if (w.length <= 3) return [w];
 
   const vowels = new Set('aeiouy');
 
-  // 方法1：CMU 词典有数据时，用音素数量均分字母
+  // 方法1：CMU 词典有数据时，从 TTS 服务获取权威音节数
   if (cmuArpabet) {
-    const tokens = cmuArpabet.split(' ');
-    const vowelTokens = new Set(['AA', 'AE', 'AH', 'AO', 'AW', 'AX', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW']);
-    // 计算音节数：AX0（弱元音）跟在元音后时是前一个元音的弱读，不独立成音节
-    const syllableCount = tokens.filter((t, idx) => {
-      const base = t.replace(/[0-2]/, '');
-      if (!vowelTokens.has(base)) return false;
-      // AX0 跟在元音后：前一个 token 的 base 也是元音
-      if (base === 'AX' && idx > 0) {
-        const prevBase = tokens[idx - 1].replace(/[0-2]/, '');
-        if (vowelTokens.has(prevBase)) return false;
+    try {
+      const res = await fetch(`http://localhost:8765/syllable-count/${encodeURIComponent(w)}`);
+      if (res.ok) {
+        const data: { syllable_count: number } = await res.json();
+        const syllableCount = data.syllable_count;
+        if (syllableCount >= 1) {
+          const result: string[] = [];
+          let pos = 0;
+          const base = Math.floor(w.length / syllableCount);
+          const remainder = w.length % syllableCount;
+          for (let s = 0; s < syllableCount; s++) {
+            const charCount = base + (s < remainder ? 1 : 0);
+            result.push(w.slice(pos, pos + charCount));
+            pos += charCount;
+          }
+          return result;
+        }
       }
-      return true;
-    }).length;
-    if (syllableCount >= 1) {
-      const result: string[] = [];
-      let pos = 0;
-      const base = Math.floor(w.length / syllableCount);
-      const remainder = w.length % syllableCount;
-      for (let s = 0; s < syllableCount; s++) {
-        const charCount = base + (s < remainder ? 1 : 0);
-        result.push(w.slice(pos, pos + charCount));
-        pos += charCount;
-      }
-      return result;
+    } catch {
+      // TTS 服务不可用，降级到方法2
     }
   }
 
@@ -137,7 +133,7 @@ export async function analyzeWord(word: string): Promise<PhonicsBreakdown> {
   const lowerWord = word.toLowerCase().trim();
   const arpabet = dict[lowerWord];
 
-  const syllables = syllabify(lowerWord, arpabet);
+  const syllables = await syllabify(lowerWord, arpabet);
   let phonemes: Phoneme[] = [];
   let stressIndex = 0;
 
