@@ -25,7 +25,7 @@ function parseArpabet(arpabetStr: string): Phoneme[] {
     const color = getPhonemeColor(type);
 
     phonemes.push({
-      grapheme: '', // 后续由音节划分填充
+      grapheme: '',
       ipa,
       arpabet: token,
       type,
@@ -37,55 +37,80 @@ function parseArpabet(arpabetStr: string): Phoneme[] {
 }
 
 /**
- * 基于最大首音原则（Maximal Onset Principle）的音节划分
+ * 基于 CMU 词典音素数量推断音节划分
+ * 优先使用 CMU 真实数据，对于 CMU 没有的词使用均衡分配启发式
  */
-function syllabify(word: string): string[] {
+function syllabify(word: string, cmuArpabet?: string): string[] {
   const w = word.toLowerCase();
   if (w.length <= 3) return [w];
 
   const vowels = new Set('aeiouy');
-  const syllables: string[] = [];
-  let current = '';
 
-  for (let i = 0; i < w.length; i++) {
-    current += w[i];
-    const isVowel = vowels.has(w[i]);
-
-    if (isVowel) {
-      // 找到元音后，看后面的辅音群如何分配
-      let consonantCluster = '';
-      let j = i + 1;
-      while (j < w.length && !vowels.has(w[j])) {
-        consonantCluster += w[j];
-        j++;
+  // 方法1：CMU 词典有数据时，用音素数量均分字母
+  if (cmuArpabet) {
+    const tokens = cmuArpabet.split(' ');
+    const vowelTokens = new Set(['AA', 'AE', 'AH', 'AO', 'AW', 'AX', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW']);
+    // 计算音节数：AX0（弱元音）跟在元音后时是前一个元音的弱读，不独立成音节
+    const syllableCount = tokens.filter((t, idx) => {
+      const base = t.replace(/[0-2]/, '');
+      if (!vowelTokens.has(base)) return false;
+      // AX0 跟在元音后：前一个 token 的 base 也是元音
+      if (base === 'AX' && idx > 0) {
+        const prevBase = tokens[idx - 1].replace(/[0-2]/, '');
+        if (vowelTokens.has(prevBase)) return false;
       }
-
-      if (j >= w.length) {
-        // 词尾辅音全部归当前音节
-        current += consonantCluster;
-        syllables.push(current);
-        current = '';
-        i = j - 1;
-      } else if (consonantCluster.length === 0) {
-        // 下一个也是元音，在此处切分
-        syllables.push(current);
-        current = '';
-      } else if (consonantCluster.length === 1) {
-        // 单辅音归下一个音节
-        syllables.push(current);
-        current = '';
-        i = j - 1; // 跳到辅音，让下一个循环处理
-      } else {
-        // 辅音群：最后一个归下一个，其余归当前
-        current += consonantCluster.slice(0, -1);
-        syllables.push(current);
-        current = '';
-        i = j - 2; // 回退到倒数第二个辅音
+      return true;
+    }).length;
+    if (syllableCount >= 1) {
+      const result: string[] = [];
+      let pos = 0;
+      const base = Math.floor(w.length / syllableCount);
+      const remainder = w.length % syllableCount;
+      for (let s = 0; s < syllableCount; s++) {
+        const charCount = base + (s < remainder ? 1 : 0);
+        result.push(w.slice(pos, pos + charCount));
+        pos += charCount;
       }
+      return result;
     }
   }
 
-  if (current) syllables.push(current);
+  // 方法2：均衡分配（CMU 没有的词使用）
+  // 音节数 = 元音数
+  const vowelCount = [...w].filter(c => vowels.has(c)).length;
+  if (vowelCount === 0) return [w];
+
+  // 辅音均匀分配到各音节
+  const consonants = [...w].map((c, i) => ({ c, i })).filter(({ c }) => !vowels.has(c));
+  const perSyllable = Math.floor(consonants.length / vowelCount);
+  const extra = consonants.length % vowelCount;
+
+  const syllables: string[] = [];
+  let pos = 0;
+  let consIdx = 0;
+
+  for (let s = 0; s < vowelCount; s++) {
+    const hasExtra = s < extra;
+    const numCons = perSyllable + (hasExtra ? 1 : 0);
+
+    // 取前面的辅音
+    const leading = w.slice(pos, pos + numCons);
+    pos += numCons;
+
+    // 找下一个元音位置
+    let nextVowelPos = -1;
+    for (let p = pos; p < w.length; p++) {
+      if (vowels.has(w[p])) { nextVowelPos = p; break; }
+    }
+
+    if (nextVowelPos === -1) {
+      syllables.push(leading + w.slice(pos));
+    } else {
+      syllables.push(leading + w.slice(pos, nextVowelPos + 1));
+      pos = nextVowelPos + 1;
+    }
+  }
+
   return syllables.length > 0 ? syllables : [w];
 }
 
@@ -112,7 +137,7 @@ export async function analyzeWord(word: string): Promise<PhonicsBreakdown> {
   const lowerWord = word.toLowerCase().trim();
   const arpabet = dict[lowerWord];
 
-  const syllables = syllabify(lowerWord);
+  const syllables = syllabify(lowerWord, arpabet);
   let phonemes: Phoneme[] = [];
   let stressIndex = 0;
 
@@ -120,11 +145,9 @@ export async function analyzeWord(word: string): Promise<PhonicsBreakdown> {
     phonemes = parseArpabet(arpabet);
     stressIndex = findStressIndex(arpabet);
   } else {
-    // CMU 词典中没有的词，用简单规则生成
     phonemes = fallbackPhonemes(lowerWord);
   }
 
-  // 为每个音素分配对应的字母（grapheme）
   assignGraphemes(phonemes, lowerWord, syllables);
 
   return {
@@ -147,7 +170,7 @@ function fallbackPhonemes(word: string): Phoneme[] {
     const isVowel = vowels.has(char);
     phonemes.push({
       grapheme: char,
-      ipa: isVowel ? `/${char}/` : `/${char}/`,
+      ipa: `/${char}/`,
       arpabet: char.toUpperCase(),
       type: isVowel ? 'vowel' : 'consonant',
       color: getPhonemeColor(isVowel ? 'vowel' : 'consonant'),
@@ -161,21 +184,18 @@ function fallbackPhonemes(word: string): Phoneme[] {
  * 将音素与字母对应
  */
 function assignGraphemes(phonemes: Phoneme[], word: string, _syllables: string[]): void {
-  // 简单的线性分配（精确匹配需要更复杂的算法）
   const vowels = new Set('aeiouy');
   let charIdx = 0;
 
   for (const phoneme of phonemes) {
     if (charIdx >= word.length) break;
 
-    // 跳过静音字母
     while (charIdx < word.length && word[charIdx] === 'e' &&
            charIdx === word.length - 1 && phonemes.length > 1) {
       charIdx++;
     }
 
     if (charIdx < word.length) {
-      // 对于元音组合，可能需要多个字母
       if (phoneme.type === 'vowel' && charIdx + 1 < word.length &&
           vowels.has(word[charIdx + 1])) {
         phoneme.grapheme = word[charIdx] + word[charIdx + 1];
@@ -195,7 +215,7 @@ export async function getSyllableDetails(word: string): Promise<SyllableInfo[]> 
   const breakdown = await analyzeWord(word);
   return breakdown.syllables.map((syl, i) => ({
     text: syl,
-    phonemes: [], // 简化版，完整版需要音素到音节的映射
+    phonemes: [],
     isStressed: i === breakdown.stressIndex,
   }));
 }
@@ -204,10 +224,17 @@ export async function getSyllableDetails(word: string): Promise<SyllableInfo[]> 
  * 播放发音（优先 Kokoro，回退 Web Speech API）
  */
 export async function speakWord(word: string, _lang?: string): Promise<void> {
-  // Kokoro 客户端延迟导入，避免初始化时阻塞
   const { speakWord: kokoroSpeak } = await import('../kokoro/index')
   const { getSavedVoice, getSavedSpeed } = await import('../kokoro/voices')
-  await kokoroSpeak(word, getSavedVoice(), getSavedSpeed())
+  try {
+    await kokoroSpeak(word, getSavedVoice(), getSavedSpeed())
+  } catch {
+    window.speechSynthesis?.cancel()
+    const utterance = new SpeechSynthesisUtterance(word)
+    utterance.lang = 'en-US'
+    utterance.rate = 0.8
+    window.speechSynthesis?.speak(utterance)
+  }
 }
 
 /**
@@ -216,9 +243,16 @@ export async function speakWord(word: string, _lang?: string): Promise<void> {
 export async function speakPhoneme(ipa: string, _lang?: string): Promise<void> {
   const { speakPhoneme: kokoroPhoneme } = await import('../kokoro/index')
   const { getSavedVoice } = await import('../kokoro/voices')
-  // Web Speech API 不能直接发 IPA，用近似音素文字代替
   const text = ipa.replace(/\//g, '').replace(/[ˈˌ]/g, '')
-  if (text) {
+  if (!text) return
+
+  try {
     await kokoroPhoneme(text, getSavedVoice())
+  } catch {
+    window.speechSynthesis?.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'en-US'
+    utterance.rate = 0.5
+    window.speechSynthesis?.speak(utterance)
   }
 }

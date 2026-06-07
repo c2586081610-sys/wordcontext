@@ -3,7 +3,7 @@
  */
 
 // Kokoro 支持的英文语音类型
-export type KokoroVoice =
+type KokoroVoice =
   | 'af_heart'  // 美式女声 Heart
   | 'af_sky'     // 美式女声 Sky
   | 'af_bella'   // 美式女声 Bella
@@ -13,6 +13,8 @@ export type KokoroVoice =
   | 'bf_lisa'    // 英式女声 Lisa
   | 'bm_george'  // 英式男声 George
   | 'bm_finlay'  // 英式男声 Finlay
+
+export type { KokoroVoice }
 
 export interface VoiceOption {
   id: KokoroVoice

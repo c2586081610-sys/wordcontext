@@ -2,7 +2,13 @@
  * Kokoro TTS 前端客户端
  * 集成本地 Kokoro-82M TTS 服务，支持 fallback 到 Web Speech API
  */
-import { KokoroVoice } from './voices'
+
+// Kokoro 语音类型（内联，避免 ESBuild 导出问题）
+type KokoroVoice =
+  | 'af_heart' | 'af_sky' | 'af_bella'
+  | 'am_adam' | 'am_michael'
+  | 'bf_emma' | 'bf_lisa'
+  | 'bm_george' | 'bm_finlay'
 
 const TTS_BASE_URL = 'http://localhost:8765'
 
@@ -12,21 +18,15 @@ const audioCache = new Map<string, HTMLAudioElement>()
 // 当前正在播放的音频实例
 let currentAudio: HTMLAudioElement | null = null
 
-// 是否 Kokoro 服务可用
-let serviceAvailable: boolean | null = null
-
-// 检测服务是否可用
+// 检测服务是否可用（每次都检测）
 export async function checkServiceHealth(): Promise<boolean> {
-  if (serviceAvailable !== null) return serviceAvailable
   try {
     const res = await fetch(`${TTS_BASE_URL}/health`, {
       method: 'GET',
       signal: AbortSignal.timeout(3000),
     })
-    serviceAvailable = res.ok
-    return serviceAvailable
+    return res.ok
   } catch {
-    serviceAvailable = false
     return false
   }
 }
@@ -282,11 +282,9 @@ export function clearCache(): void {
 
 // 获取服务状态
 export function getServiceStatus(): {
-  available: boolean | null
   cacheSize: number
 } {
   return {
-    available: serviceAvailable,
     cacheSize: audioCache.size,
   }
 }
