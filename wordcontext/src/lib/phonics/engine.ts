@@ -201,25 +201,24 @@ export async function getSyllableDetails(word: string): Promise<SyllableInfo[]> 
 }
 
 /**
- * 使用 Web Speech API 播放发音
+ * 播放发音（优先 Kokoro，回退 Web Speech API）
  */
-export function speakWord(word: string, lang = 'en-US'): void {
-  if (!('speechSynthesis' in window)) return;
-  const utterance = new SpeechSynthesisUtterance(word);
-  utterance.lang = lang;
-  utterance.rate = 0.8;
-  utterance.pitch = 1;
-  speechSynthesis.speak(utterance);
+export async function speakWord(word: string, _lang?: string): Promise<void> {
+  // Kokoro 客户端延迟导入，避免初始化时阻塞
+  const { speakWord: kokoroSpeak } = await import('../kokoro/index')
+  const { getSavedVoice, getSavedSpeed } = await import('../kokoro/voices')
+  await kokoroSpeak(word, getSavedVoice(), getSavedSpeed())
 }
 
 /**
  * 播放单个音素（通过拼读近似音）
  */
-export function speakPhoneme(ipa: string, lang = 'en-US'): void {
-  if (!('speechSynthesis' in window)) return;
-  // Web Speech API 不能直接发 IPA，用近似单词代替
-  const utterance = new SpeechSynthesisUtterance(ipa.replace(/\//g, ''));
-  utterance.lang = lang;
-  utterance.rate = 0.5;
-  speechSynthesis.speak(utterance);
+export async function speakPhoneme(ipa: string, _lang?: string): Promise<void> {
+  const { speakPhoneme: kokoroPhoneme } = await import('../kokoro/index')
+  const { getSavedVoice } = await import('../kokoro/voices')
+  // Web Speech API 不能直接发 IPA，用近似音素文字代替
+  const text = ipa.replace(/\//g, '').replace(/[ˈˌ]/g, '')
+  if (text) {
+    await kokoroPhoneme(text, getSavedVoice())
+  }
 }

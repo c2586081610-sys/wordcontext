@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+tts-service/venv/
+tts-service/*.log
+tts-service/*.pid
+tts-service/*.mp3
+tts-service/*.wav
+tts-service/test_*
+__pycache__/
+*.pyc
