@@ -46,47 +46,89 @@ function parseArpabet(arpabetStr: string): Phoneme[] {
  */
 const ARPABET_VOWELS = new Set(['AA','AE','AH','AO','AW','AX','AY','EH','ER','EY','IH','IY','OW','OY','UH','UW']);
 
+// 二合元音：CMU 里的 Y 是 glide（半元音），不占独立字母
+// 例: new=N UW1, boy=B OY1, day=D EY1, my=M AY1, bite=B AY1 T, house=H AW1 S
+const DIPHTHONG_VOWELS = new Set(['UW', 'IY', 'AY', 'EY', 'OY', 'AW']);
+
+// checked (lax) vowels: 必须有 coda 否则开音节不合法 (Kahn 1976)
+// 例: family (AE1+M+AH0 → M coda of fam), holiday (AA1+L+AH0 → L coda of hol)
+const CHECKED_VOWELS = new Set(['AA', 'AE', 'AH', 'AO', 'EH', 'IH', 'UH']);
+// free (tense) vowels: 可以开音节，不需要 coda
+// 例: computer (UW1+T+ER0 → T onset of ter), table (EY1+B+AH0 → B onset of ble)
+//  R-colored ER 也算 free，可以形成完整闭音节
+
 /**
-};
+ * 从 arpabet token 提取重音级别 (0=无, 1=主重音, 2=次重音)
+ */
+function parseStress(token: string): number {
+  const last = token.slice(-1);
+  return last === '1' || last === '2' || last === '0' ? parseInt(last, 10) : 0;
+}
 
 /**
  * 将 arpabet 音素序列与单词字母对齐，返回每个音素对应的字母范围
+ *
+ * 关键修正（Y-as-glide）：
+ *   - Y token 后面紧跟 diphthong 元音（UW/IY/AY/EY/OY/AW）时，Y 是 glide，
+ *     不消耗字母（占位 range），让下一个 vowel token 拿走该字母
+ *   - 否则 Y 是 consonantal（/j/，如 yes/young），匹配字母 `y`
+ *
+ * 输出：每个 range 含 { start, end, grapheme } 三个字段
+ *   - Y-glide 占位的 range.start === range.end 且 grapheme === ''
+ *   - 其它 range 至少含 1 个字母
  */
-function alignArpabetToWord(arpabetStr: string, word: string): { start: number; end: number }[] {
+function alignArpabetToWord(arpabetStr: string, word: string): { start: number; end: number; grapheme: string }[] {
   const tokens = arpabetStr.split(' ');
   const w = word.toLowerCase();
-  const ranges: { start: number; end: number }[] = [];
+  const ranges: { start: number; end: number; grapheme: string }[] = [];
   let charPos = 0;
 
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
     const base = token.replace(/[0-2]/, '');
     if (charPos >= w.length) break;
 
+    // Y-as-glide 特判：下一个 token 是 diphthong 元音时，Y 是 glide
+    if (base === 'Y') {
+      const nextToken = tokens[i + 1]?.replace(/[0-2]/, '');
+      if (nextToken && DIPHTHONG_VOWELS.has(nextToken)) {
+        // glide：占位 range，不消耗字母
+        ranges.push({ start: charPos, end: charPos, grapheme: '' });
+        continue;
+      }
+    }
+
     if (ARPABET_VOWELS.has(base)) {
-      // 元音：匹配1-2个字母
+      // 元音：匹配 1-2 个字母（特殊处理 Y 结尾的 diphthong）
       const start = charPos;
-      if (charPos + 1 < w.length && VOWEL_COMBOS.has(w[charPos] + w[charPos + 1])) {
-        ranges.push({ start, end: charPos + 2 });
+      // 特殊: IY/AY/EY/OY 后的字母是 'y' (consonantal Y 写法) 时, 优先匹配 'y'
+      // 例: memory 的 IY0 → 'y' 而不是 'r'
+      // 例: city 的 IY0 → 'y', accompany 的 IY0 → 'y'
+      if (['IY', 'AY', 'EY', 'OY'].includes(base) && w[charPos] === 'y') {
+        ranges.push({ start, end: charPos + 1, grapheme: 'y' });
+        charPos += 1;
+      } else if (charPos + 1 < w.length && VOWEL_COMBOS.has(w[charPos] + w[charPos + 1])) {
+        ranges.push({ start, end: charPos + 2, grapheme: w.slice(start, charPos + 2) });
         charPos += 2;
       } else {
-        ranges.push({ start, end: charPos + 1 });
+        ranges.push({ start, end: charPos + 1, grapheme: w[charPos] });
         charPos += 1;
       }
     } else {
-      // 辅音：尝试匹配对应的字母组合
+      // 辅音：按长度倒序匹配（长的优先以处理双写 / digraph）
       const possibleGraphemes = CONSONANT_GRAPHEMES[base] || [base.toLowerCase()];
       let matched = false;
       for (const g of possibleGraphemes) {
         if (w.slice(charPos, charPos + g.length) === g) {
-          ranges.push({ start: charPos, end: charPos + g.length });
+          ranges.push({ start: charPos, end: charPos + g.length, grapheme: g });
           charPos += g.length;
           matched = true;
           break;
         }
       }
       if (!matched) {
-        // 无法匹配，跳过1个字母
-        ranges.push({ start: charPos, end: charPos + 1 });
+        // 无法匹配，强行占 1 个字母（用于 fallback / 调试）
+        ranges.push({ start: charPos, end: charPos + 1, grapheme: w[charPos] || '' });
         charPos += 1;
       }
     }
@@ -97,29 +139,39 @@ function alignArpabetToWord(arpabetStr: string, word: string): { start: number; 
 
 /**
  * 基于 arpabet 音素序列划分音节
- * 按元音音素确定音节核，辅音按英语规则分配到相邻音节
+ *
+ * 算法依据：Maximal Onset Principle (Selkirk 1982) + Liang 1983 + Giegerich 1992 重音规则
+ *
+ * 规则汇总：
+ *   VCV (1 cons) — stress-aware:
+ *     - V(stress 1) + C + V(stress 0)        → C 归前 coda (e.g. family, holiday, orange)
+ *     - V(stress 1) + C + V(stress 2)        → C 归前 coda (e.g. tomorrow, celebrate)
+ *     - 其它                                    → C 归后 onset (max onset, e.g. photograph)
+ *     - 跨多字母且为双写 (cc/pp/tt/ll/...)    → 切在中间 (e.g. accompany → ac|com|pa|ny)
+ *
+ *   VCCV (2 cons):
+ *     - c1+c2 是 digraph (sh/ch/th/ph/...)     → 整体归后 (1 个音素不可拆)
+ *     - c1+c2 是 word-initial blend (bl/str/...) → 整体归后
+ *     - 其它                                     → VC|CV (c1 归前 coda, c2 归后 onset)
+ *
+ *   VCCCV+ (3+ cons): 默认 VC|CCV (c1 归前 coda)
  */
 function syllabifyFromArpabet(arpabetStr: string, word: string): string[] {
   const tokens = arpabetStr.split(' ');
   const w = word.toLowerCase();
   const ranges = alignArpabetToWord(arpabetStr, w);
 
-  // 找所有元音音素 token 索引
+  // 找所有元音音素 token 索引（过滤 Y-glide 占位：其 range 是 zero-length 且 grapheme 为空）
   const vowelTokenIdx: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const base = tokens[i].replace(/[0-2]/, '');
-    if (ARPABET_VOWELS.has(base)) vowelTokenIdx.push(i);
+    if (!ARPABET_VOWELS.has(base)) continue;
+    const r = ranges[i];
+    if (r && r.start === r.end && r.grapheme === '') continue; // 跳过 Y-glide
+    vowelTokenIdx.push(i);
   }
   if (vowelTokenIdx.length <= 1) return [w];
 
-  // 音节边界 = 字符位置
-  // 核心规则（基于 Maximal Onset Principle + Liang 1983）:
-  //   - VCV (1 cons):         V | CV      → 切在 cons 起点
-  //                            特殊: cons 跨多字母 (双写) → 切在中间 (让 cc 拆为 c|c)
-  //   - VCCV (2 cons):        VC | CV     → 切在 c1 结尾
-  //                            例外: c1+c2 是 digraph (单音素) → 切在 vowel 后
-  //                            例外: c1+c2 是 blend 且位于词首 (onset) → 切在 vowel 后
-  //   - VCCCV+ (3+ cons):     VC | CCV    → 切在 c1 结尾
   const splitPositions: number[] = []
 
   for (let v = 0; v < vowelTokenIdx.length - 1; v++) {
@@ -129,8 +181,14 @@ function syllabifyFromArpabet(arpabetStr: string, word: string): string[] {
     const consEnd = nextV - 1
     const consCount = consEnd - consStart + 1
 
+    // checked-V 决策: 当前元音是 checked (lax) + 主重音 → C 归前 coda
+    // (Giegerich 1992 "Open Syllable Correction": 短元音必须有 coda)
+    const curVBase = tokens[curV].replace(/[0-2]/, '');
+    const curStress = parseStress(tokens[curV]);
+    const checkedTakesCoda = CHECKED_VOWELS.has(curVBase) && curStress === 1;
+
     if (consCount === 1) {
-      // VCV: 切在 cons 起点 (cons 归后作 onset)
+      // VCV
       const r = ranges[consStart]
       if (!r) continue
       const rStart = r.start
@@ -147,34 +205,61 @@ function syllabifyFromArpabet(arpabetStr: string, word: string): string[] {
           splitPositions.push(rStart)
         }
       } else {
-        // 单字母辅音: 切在 cons 起点
-        splitPositions.push(rStart)
+        // 单字母辅音: checked-V 决策
+        if (checkedTakesCoda) {
+          splitPositions.push(rEnd)  // C 归前 coda (checked 短元音需要 coda)
+        } else {
+          splitPositions.push(rStart)  // C 归后 onset (max onset)
+        }
       }
     } else if (consCount === 2) {
-      // VCCV
-      const c1Base = tokens[consStart].replace(/[0-2]/, '')
-      const c2Base = tokens[consStart + 1].replace(/[0-2]/, '')
-      const c1Graph = (CONSONANT_GRAPHEMES[c1Base] || [c1Base.toLowerCase()])[0]
-      const c2Graph = (CONSONANT_GRAPHEMES[c2Base] || [c2Base.toLowerCase()])[0]
-      const pair = c1Graph + c2Graph
+      // VCCV：用 aligner 实际匹配的 grapheme 做 digraph/blend 检查
       const r1 = ranges[consStart]
       const r2 = ranges[consStart + 1]
       if (!r1 || !r2) continue
+      const c1Graph = r1.grapheme || ''
+      const c2Graph = r2.grapheme || ''
+      const pair = c1Graph + c2Graph
+      // c1 是否为双写辅音 (cc, dd, pp, tt, ll, ss, nn, mm, rr, bb, ff, gg)
+      const c1IsDouble = c1Graph.length === 2 && c1Graph[0] === c1Graph[1]
 
       if (DIGRAPHS.has(pair)) {
-        // digraph 是单音素不可拆, 整体归后
+        // digraph 是单音素不可拆, 整体归后 (切在 vowel 末尾)
         splitPositions.push(r1.start)
-      } else if (BLENDS.has(pair) && consStart === 1) {
-        // blend 仅在词首 (onset 位置) 整体归后
-        splitPositions.push(r1.start)
-      } else {
-        // VC | CV: 切在 c1 结尾 (c1 归前作 coda)
+      } else if (c1IsDouble) {
+        // c1 是双写辅音 (e.g. classroom 的 ss): c1 保留为 coda 整体, c2 归后 onset
+        // 例: classroom (AE1 + ss + r + UW2) → "class"+"room"
+        // 注意: VCCV 的 c1 是独立 token, 不切中间 (那在 VCV 跨多字母分支处理)
         splitPositions.push(r1.end)
+      } else if (checkedTakesCoda) {
+        // checked 短元音 + 主重音: c1 归前 coda, c2 归后 onset (VC|CV)
+        // 例: address (AE1 + d + r + EH2) → "ad"+"dress"
+        splitPositions.push(r1.end)
+      } else {
+        // 默认: V|CCV (max onset, c1+c2 都归后 onset)
+        // 例: photograph (AH0 + g + r + AE2, AH0 不主重音) → "pho"+"to"+"graph"
+        splitPositions.push(r1.start)
+      }
+    } else if (consCount >= 3) {
+      // VCCCV+: 默认 VC|CCV, 切在 c1 结尾
+      // 注: c1 是双写辅音时也应切在中间
+      const r1 = ranges[consStart]
+      if (r1) {
+        const c1Graph = r1.grapheme || ''
+        const c1IsDouble = c1Graph.length === 2 && c1Graph[0] === c1Graph[1]
+        if (c1IsDouble) {
+          splitPositions.push(Math.floor((r1.start + r1.end) / 2))
+        } else {
+          splitPositions.push(r1.end)
+        }
       }
     } else {
-      // 3+ cons: VC | CCV, 切在 c1 结尾
-      const r1 = ranges[consStart]
-      if (r1) splitPositions.push(r1.end)
+      // consCount <= 0: VV 间隔 (hiatus) — 直接在 curV 末尾切
+      // 例: memory (EH1 + M + ER0 + IY0) 在 ER0 和 IY0 之间分开
+      // 例: people (P IY1 P AH0 L) AH0 和 ... 不算
+      // 跳过 Y-glide 占位 range
+      const curR = ranges[curV]
+      if (curR) splitPositions.push(curR.end)
     }
   }
 

@@ -1,5 +1,114 @@
 import type { PhonemeType } from './types';
 
+/**
+ * ═══════════════════════════════════════════════════════════════
+ *  特殊情形存档 (SPECIAL CASES) — 2026-06-25 Codex 复查整理
+ * ═══════════════════════════════════════════════════════════════
+ *
+ *  本模块处理英语自然拼读的"边界情况"，每条规则都标注了权威出处和测试样本。
+ *  详见 work/phonics-analysis/analysis.md。
+ *
+ * 1. 双写辅音 (cc, dd, pp, tt, ll, ss, nn, mm, rr, bb, ff, gg)
+ *    - 拼写上两个相同辅音，CMU 通常只标一个音素
+ *    - VCV 切分：跨 2 字母的 C 切在中间 (e.g. accompany → ac|com|pa|ny)
+ *    - VCCV 切分：c1 保留为 coda 整体，c2 归后 onset (e.g. classroom → class|room)
+ *    - VCCV 切分: c1 是双写时不切中间 (避免 add|ress 这种错误)
+ *    - 词典: Orton-Gillingham / CMU
+ *
+ * 2. Silent K (knife, knee, knob, know, knock, knack)
+ *    Silent W (write, wrong, who, whole, wrap, wrestle, wring)
+ *    Silent G (gnome, gnaw, gnat, sign, design)
+ *    Silent B (climb, comb, dumb, thumb, lamb, bomb)
+ *    Silent L (talk, half, calm, could, should, would, folk, yolk)
+ *    Silent T (listen, castle, whistle, fasten, hasten, often, soften)
+ *    Silent H (honest, hour, honor, exhibit)
+ *    Silent E (词尾) (bake, make, name, code, hope, five, blue)
+ *    - CMU 词典不包含静音字母，自然不消耗字母
+ *    - aligner 不会把它们匹配为单独的音素
+ *
+ * 3. Y 的双重身份
+ *    - consonantal Y (独立 /j/ 音): yes, year, young, yellow, beyond
+ *    - glide Y (二合元音 /ij/, /aj/, /ej/, /oj/ 的一部分): new, boy, day, my
+ *    - 算法识别: Y token 后面紧跟 DIPHTHONG_VOWELS (UW/IY/AY/EY/OY/AW) → glide
+ *    - glide 时 Y 不消耗字母, 让下一个 vowel token 拿走该字母
+ *
+ * 4. -tion / -sion 词尾
+ *    - station, action, nation, education, vision, decision
+ *    - CMU 用 SH AH0 N (或 ZH AH0 N) 表达 -tion/-sion
+ *    - SH/ZH 标在 digraph 集合, 整体归后 onset
+ *
+ * 5. -le 词尾
+ *    - bottle, table, candle, puzzle, simple, purple
+ *    - CMU 用 AH0 L 表达, 末音节结构: C + AH0 + L (L 是 onset)
+ *    - 例外: -le 在词首 (如 "lemon") 时 L 是普通辅音
+ *
+ * 6. R-controlled 元音 (ar, or, er, ir, ur, ear, our, air)
+ *    - car, her, bird, word, turn, fear, journey, chair
+ *    - CMU 标 AA1 R, ER0/ER1, EH1 R, ER0/ER1, IH1 R, IY1 R, AW1 R, EH1 R
+ *    - 视为 free vowel (r-colored), 不需要 coda
+ *
+ * 7. Qu
+ *    - queen, quick, quiet, quest, quote
+ *    - CMU 用 K W 表达 (K 是 /k/, W 是 /w/)
+ *    - aligner 中 W 的 grapheme 选项包含 'wh' (when) 和 'w' (其他)
+ *
+ * 8. 软 G (g before e/i/y)
+ *    - gem, ginger, gym, page, giraffe
+ *    - CMU 用 JH 表达 (/dʒ/), aligner 通过 CMU 直接处理
+ *
+ * 9. 软 C (c before e/i/y)
+ *    - city, center, cycle, face, pace
+ *    - CMU 用 S 表达 (/s/), aligner 通过 CMU 直接处理
+ *
+ * 10. Silent GH (high, light, right, thought, though, through)
+ *     - CMU 不包含 GH, aligner 不匹配
+ *
+ * 11. Silent PH (phone, philosophy)
+ *     - PH 在 CMU 标 F, aligner 中 F 的 options 包含 'ph'
+ *
+ * 12. KN/WR 静默首字母
+ *     - knife, write, wreath, wrist, knuckle
+ *     - CMU 不包含 K/W, aligner 自动从第一个字母开始
+ *
+ * 13. -ed 词尾的三种发音
+ *     - 清辅音后 (kissed, walked) → /t/ (CMU: T)
+ *     - 浊辅音/元音后 (loved, played) → /d/ (CMU: D)
+ *     - t/d 后 (wanted, needed) → AH0 D (CMU: AH0 D)
+ *     - CMU 已直接标注, aligner 无需处理
+ *
+ * 14. Silent K/G/W 的"重拼" (knight, gnaw, wrist)
+ *     - aligner 跳过这些静默字母
+ *     - 例: knife N AY1 F → aligner 跳过 k, 从 n 开始
+ *
+ * 15. 拼写 -eigh / -aigh / -igh
+ *     - eight, weigh, sleigh, neighbor
+ *     - CMU 用 EY1, EY1, EY1, EY1 R 等
+ *
+ * 16. -ough 的多种发音
+ *     - through (UW1), thought (AO1 T), though (OW1), tough (AH1 F)
+ *     - rough (AH1 F), bough (AW1)
+ *     - CMU 各自标注, aligner 直接处理
+ *
+ * 17. diphthong 中的 glide Y 在词首
+ *     - use (Y UW1 Z), united (Y UW2 N AY2 T IH0 D), uniform
+ *     - 第一个 token Y 是 glide, 不消耗字母, UW1 拿第一个字母
+ *     - aligner 走 Y-as-glide 分支, 跳过首字母消耗
+ *
+ * 18. 复合词
+ *     - classroom, football, bedroom, weekend
+ *     - CMU 完整标注, aligner 自然处理 (不会"合并"两个音节)
+ *     - 例外: 一些在 CMU 中是单 token 的合写 (anything → EH2 N IY0 TH IH0 NG, 实际是 any+thing 复合)
+ *
+ * 19. 缩略词 (I'm, don't, it's, we're)
+ *     - CMU 标注完整, aligner 正常处理
+ *     - 但要注意 IY1 M (I'm) 的 IY 在词首, 是 consonantal Y (因为 M 不是 diphthong vowel)
+ *
+ * 20. 外来词 (pizza, tortilla, jalapeno)
+ *     - CMU 不一定收录, fallback 到 splitByRules
+ *
+ * ═══════════════════════════════════════════════════════════════
+ */
+
 // 颜色编码
 export const PHONEME_COLORS: Record<PhonemeType, string> = {
   consonant: '#2563EB',     // 蓝色
