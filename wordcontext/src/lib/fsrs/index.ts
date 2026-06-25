@@ -110,7 +110,6 @@ export async function loadFSRSParameters(): Promise<boolean> {
     const entry = await db.settings.get('fsrs');
     if (entry?.fsrsParameters) {
       updateFSRSInstance(entry.fsrsParameters);
-      console.log('[FSRS] 已加载训练参数，上次训练时间:', entry.lastTrainedAt);
       return true;
     }
   } catch (err) {
@@ -137,7 +136,6 @@ export async function trainParameters(): Promise<FSRSParameters | null> {
     const logs = await db.studyLogs.orderBy('id').toArray();
 
     if (logs.length < TRAINING_THRESHOLD) {
-      console.log(`[FSRS] 复习记录不足 ${TRAINING_THRESHOLD} 条，跳过训练`);
       return null;
     }
 
@@ -259,7 +257,6 @@ export async function trainParameters(): Promise<FSRSParameters | null> {
     // 更新当前 FSRS 实例
     updateFSRSInstance(trainedParams);
 
-    console.log('[FSRS] 参数训练完成，已更新 FSRS 实例');
     return trainedParams;
   } catch (err) {
     console.error('[FSRS] 参数训练失败:', err);
@@ -279,9 +276,7 @@ export async function checkAndTrainIfNeeded(): Promise<void> {
     if (!entry) {
       // 没有 settings 记录，检查总复习次数
       if (totalLogs >= TRAINING_THRESHOLD) {
-        console.log('[FSRS] 达到训练阈值，开始后台训练...');
-        // 异步训练，不阻塞主流程
-        trainParameters().catch(err => console.error('[FSRS] 后台训练失败:', err));
+        trainParameters().catch(() => {});
       }
       return;
     }
@@ -291,9 +286,7 @@ export async function checkAndTrainIfNeeded(): Promise<void> {
     await db.settings.update('fsrs', { reviewCountSinceTraining: countSinceTraining });
 
     if (countSinceTraining >= TRAINING_THRESHOLD) {
-      console.log('[FSRS] 自上次训练以来新增复习达到阈值，开始后台训练...');
-      // 异步训练，不阻塞主流程
-      trainParameters().catch(err => console.error('[FSRS] 后台训练失败:', err));
+      trainParameters().catch(() => {});
     }
   } catch (err) {
     console.warn('[FSRS] 检查训练条件失败:', err);

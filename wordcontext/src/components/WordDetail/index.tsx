@@ -2,6 +2,8 @@ import { useStudyStore } from '../../stores/useStudyStore';
 import { PhonicsDisplay } from '../PhonicsDisplay';
 import { speakWord } from '../../lib/phonics';
 import { getMemoryStrength, getDueLabel, getStateLabel } from '../../lib/fsrs';
+import { lookupECDICT, translateSentences, type ECDICTResult } from '../../lib/ecdict';
+import { InteractiveSentence } from '../InteractiveSentence';
 import { useEffect, useCallback, useState } from 'react';
 import type { ReviewRating } from '../../lib/fsrs';
 
@@ -22,15 +24,39 @@ export function WordDetail() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [flyOut, setFlyOut] = useState(false);
+  const [ecdictData, setEcdictData] = useState<ECDICTResult | null>(null);
+  const [exampleTranslations, setExampleTranslations] = useState<string[]>([]);
 
   const word = words[currentIndex];
   const card = word ? cards.get(word.id) : null;
+
+  // 查询 ECDICT 补充释义
+  useEffect(() => {
+    if (!word) return;
+    setEcdictData(null);
+    lookupECDICT(word.word).then(data => setEcdictData(data));
+  }, [word?.id]);
+
+  // 查询例句翻译
+  useEffect(() => {
+    if (!word || !word.examples.length) {
+      setExampleTranslations([]);
+      return;
+    }
+    translateSentences(word.examples).then(setExampleTranslations);
+  }, [word?.id]);
+
+  // 合并释义：优先使用 ECDICT 数据（更丰富），回退到本地数据
+  const definitions = ecdictData?.definitions?.length
+    ? ecdictData.definitions
+    : word?.definitions ?? [];
 
   // 生成选择题选项
   const [options, setOptions] = useState<{ pos: string; meaning: string }[]>([]);
   useEffect(() => {
     if (!word) return;
-    const correct = word.definitions[0];
+    const correct = definitions[0];
+    if (!correct) return;
     const others = words
       .filter(w => w.id !== word.id)
       .sort(() => Math.random() - 0.5)
@@ -40,7 +66,7 @@ export function WordDetail() {
     setOptions(allOptions);
     setSelectedAnswer(null);
     setShowResult(false);
-  }, [word?.id]);
+  }, [word?.id, definitions]);
 
   // 快捷键
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -197,7 +223,7 @@ export function WordDetail() {
           <h3 className="text-center text-sm text-slate-500 dark:text-slate-400 mb-4">── 选择正确的中文意思 ──</h3>
           <div className="grid grid-cols-2 gap-3">
             {options.map((opt, i) => {
-              const isCorrect = opt.meaning === word.definitions[0].meaning;
+              const isCorrect = opt.meaning === definitions[0]?.meaning;
               const isSelected = selectedAnswer === i;
 
               let bgClass = 'bg-white dark:bg-slate-700 hover:bg-blue-50 dark:hover:bg-slate-600 border-slate-200 dark:border-slate-600';
@@ -229,7 +255,7 @@ export function WordDetail() {
           {showResult && (
             <div className="mt-6 text-center card-slide-in">
               <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
-                {selectedAnswer !== null && options[selectedAnswer]?.meaning === word.definitions[0].meaning
+                {selectedAnswer !== null && options[selectedAnswer]?.meaning === definitions[0]?.meaning
                   ? '答对了！'
                   : '再想想这个词的意思'}
               </p>
@@ -254,12 +280,23 @@ export function WordDetail() {
       {detailSubMode === 'rate' && (
         <div className="glass rounded-2xl p-6">
           <div className="text-center mb-6">
-            {word.definitions.map((d, i) => (
+            {definitions.map((d, i) => (
               <div key={i} className="text-lg text-slate-700 dark:text-slate-300">
                 <span className="text-slate-400 dark:text-slate-500 mr-2">{d.pos}</span>
                 {d.meaning}
               </div>
             ))}
+            {/* ECDICT 英文释义 */}
+            {ecdictData?.definitions_en?.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                {ecdictData.definitions_en.map((d, i) => (
+                  <div key={i} className="text-sm text-slate-500 dark:text-slate-400">
+                    <span className="text-slate-400 dark:text-slate-500 mr-2">{d.pos}</span>
+                    {d.meaning}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-3 mb-6">
@@ -309,10 +346,52 @@ export function WordDetail() {
                 <span className="text-slate-600 dark:text-slate-300">{word.etymology}</span>
               </div>
             )}
-            {word.wordFamily.length > 1 && (
+            {/* ECDICT 词形变化 */}
+            {ecdictData?.exchange && Object.keys(ecdictData.exchange).length > 0 && (
+              <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <span className="text-blue-600 dark:text-blue-400 font-medium">词形</span>
+                <span className="text-slate-600 dark:text-slate-300">
+                  {Object.entries(ecdictData.exchange)
+                    .map(([key, val]) => {
+                      const labels: Record<string, string> = {
+                        p: '过去式', d: '过去分词', i: '现在分词',
+                        '3': '第三人称', s: '名词复数', r: '比较级',
+                        t: '最高级', f: '词根',
+                      };
+                      return `${labels[key] || key}: ${val}`;
+                    })
+                    .join(' · ')}
+                </span>
+              </div>
+            )}
+            {(word.wordFamily.length > 1 || (ecdictData?.exchange && Object.keys(ecdictData.exchange).length > 0)) && (
               <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                 <span className="text-blue-600 dark:text-blue-400 font-medium">词族</span>
-                <span className="text-slate-600 dark:text-slate-300">{word.wordFamily.join(' · ')}</span>
+                <span className="text-slate-600 dark:text-slate-300">
+                  {[
+                    ...word.wordFamily,
+                    ...Object.values(ecdictData?.exchange ?? {}),
+                  ].filter((v, i, arr) => arr.indexOf(v) === i && v !== word.word).join(' · ')}
+                </span>
+              </div>
+            )}
+            {/* ECDICT 考试标签 & 词频 */}
+            {ecdictData && (ecdictData.tags.length > 0 || ecdictData.collins > 0 || ecdictData.oxford > 0) && (
+              <div className="flex items-start gap-2 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+                <span className="text-purple-600 dark:text-purple-400 font-medium">标签</span>
+                <span className="text-slate-600 dark:text-slate-300">
+                  {ecdictData.tags.map(t => {
+                    const labels: Record<string, string> = {
+                      zk: '中考', gk: '高考', cet4: '四级', cet6: '六级',
+                      ky: '考研', toefl: '托福', ielts: '雅思', gre: 'GRE',
+                      gmat: 'GMAT', sat: 'SAT', bec: 'BEC',
+                    };
+                    return labels[t] || t.toUpperCase();
+                  }).join(' · ')}
+                  {ecdictData.collins > 0 && ` · 柯林斯${ecdictData.collins}星`}
+                  {ecdictData.oxford > 0 && ' · 牛津3000'}
+                  {ecdictData.bnc != null && ` · BNC #${ecdictData.bnc}`}
+                </span>
               </div>
             )}
           </div>
@@ -327,9 +406,17 @@ export function WordDetail() {
       <div className="glass rounded-2xl p-5 mt-4">
         <h3 className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-3">例句</h3>
         {word.examples.map((ex, i) => (
-          <p key={i} className="text-sm text-slate-600 dark:text-slate-300 mb-2 last:mb-0 leading-relaxed">
-            {i + 1}. {ex}
-          </p>
+          <div key={i} className="mb-3 last:mb-0">
+            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+              <span className="text-slate-400 dark:text-slate-500 mr-1">{i + 1}.</span>
+              <InteractiveSentence sentence={ex} highlightWord={word.word} />
+            </p>
+            {exampleTranslations[i] && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 ml-5">
+                {exampleTranslations[i]}
+              </p>
+            )}
+          </div>
         ))}
       </div>
     </div>

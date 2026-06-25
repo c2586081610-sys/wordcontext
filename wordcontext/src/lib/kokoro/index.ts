@@ -18,15 +18,25 @@ const audioCache = new Map<string, HTMLAudioElement>()
 // 当前正在播放的音频实例
 let currentAudio: HTMLAudioElement | null = null
 
-// 检测服务是否可用（每次都检测）
+// 服务健康状态缓存（避免每次播放都发 health 请求导致 ERR_ABORTED）
+let healthCache = { available: false, timestamp: 0 }
+const HEALTH_CACHE_TTL = 30_000 // 30秒内复用健康检查结果
+
+// 检测服务是否可用（带缓存，避免频繁请求）
 export async function checkServiceHealth(): Promise<boolean> {
+  const now = Date.now()
+  if (now - healthCache.timestamp < HEALTH_CACHE_TTL) {
+    return healthCache.available
+  }
   try {
     const res = await fetch(`${TTS_BASE_URL}/health`, {
       method: 'GET',
       signal: AbortSignal.timeout(3000),
     })
+    healthCache = { available: res.ok, timestamp: now }
     return res.ok
   } catch {
+    healthCache = { available: false, timestamp: now }
     return false
   }
 }
@@ -85,7 +95,7 @@ export async function speakWord(
         return
       }
     } catch (e) {
-      console.warn('[Kokoro] 请求失败，fallback 到本地 TTS:', e)
+      // fallback 到本地 TTS
     }
   }
 
@@ -139,7 +149,7 @@ export async function speakSyllable(
         return
       }
     } catch (e) {
-      console.warn('[Kokoro] 音节请求失败:', e)
+      return null
     }
   }
 
@@ -197,7 +207,7 @@ export async function speakSentence(
         return
       }
     } catch (e) {
-      console.warn('[Kokoro] 句子请求失败:', e)
+      // fallback
     }
   }
 

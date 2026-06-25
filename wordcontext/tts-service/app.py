@@ -13,6 +13,8 @@ from contextlib import asynccontextmanager
 import torch
 import soundfile as sf
 import numpy as np
+import sqlite3
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -27,6 +29,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # ========== 配置 ==========
 PORT = 8765
 SAMPLE_RATE = 24000
+ECDICT_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stardict.db")
 
 # 可用语音列表
 AMERICAN_VOICES = {
@@ -48,6 +51,17 @@ ALL_VOICES = {**AMERICAN_VOICES, **BRITISH_VOICES}
 _pipeline_am = None
 _pipeline_bm = None
 _pipeline_bf = None
+
+# ECDICT 数据库连接
+_ecdict_conn = None
+
+def get_ecdict_conn() -> sqlite3.Connection:
+    """获取 ECDICT 数据库连接（每次请求新建连接，避免线程安全问题）"""
+    if not os.path.exists(ECDICT_DB_PATH):
+        raise FileNotFoundError(f"ECDICT database not found: {ECDICT_DB_PATH}")
+    conn = sqlite3.connect(ECDICT_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def get_pipeline(lang_code: str = 'a') -> KPipeline:
     """获取 Kokoro pipeline，按语言代码缓存"""
@@ -157,6 +171,182 @@ def syllable_count(word: str):
         "syllable_count": len(stresses[0]),
         "stresses": stresses[0],
     }
+
+@app.get("/ecdict/{word}")
+def ecdict_lookup(word: str):
+    """从 ECDICT 数据库查询单词的详细释义"""
+    try:
+        conn = get_ecdict_conn()
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="ECDICT database not available")
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM stardict WHERE word = ? COLLATE NOCASE", (word,))
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Word '{word}' not found in ECDICT")
+
+        # 解析 translation 字段：将 "vt. 放弃, 抛弃\nn. 放任" 拆分为 definitions 数组
+        definitions = []
+        translation = row["translation"] or ""
+        definition_en = row["definition"] or ""
+
+        # 解析中文释义
+        if translation:
+            import re
+            parts = re.split(r'(?=\b(?:n|v|vt|vi|v\.|adj|adv|prep|conj|pron|interj|art|num|aux|mod)\.)', translation)
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+                match = re.match(r'^(\w+\.)\s*(.+)', part)
+                if match:
+                    definitions.append({
+                        "pos": match.group(1),
+                        "meaning": match.group(2).strip(),
+                    })
+                else:
+                    if definitions:
+                        definitions[-1]["meaning"] += "；" + part
+                    else:
+                        definitions.append({"pos": "", "meaning": part})
+
+        # 解析英文释义
+        definitions_en = []
+        if definition_en:
+            for line in definition_en.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                match = re.match(r'^([a-z]+\.)\s*(.+)', line)
+                if match:
+                    definitions_en.append({
+                        "pos": match.group(1),
+                        "meaning": match.group(2).strip(),
+                    })
+                else:
+                    if definitions_en:
+                        definitions_en[-1]["meaning"] += " " + line
+                    else:
+                        definitions_en.append({"pos": "", "meaning": line})
+
+        # 解析 tag 字段
+        tags = []
+        tag_str = row["tag"] or ""
+        if tag_str:
+            tags = tag_str.split()
+
+        # 解析 exchange 字段（词形变化）
+        exchange = {}
+        exchange_str = row["exchange"] or ""
+        if exchange_str:
+            for item in exchange_str.split("/"):
+                if ":" in item:
+                    key, val = item.split(":", 1)
+                    exchange[key] = val
+
+        return {
+            "word": row["word"],
+            "phonetic": row["phonetic"] or "",
+            "definitions": definitions,
+            "definitions_en": definitions_en,
+            "pos": row["pos"] or "",
+            "collins": row["collins"] or 0,
+            "oxford": row["oxford"] or 0,
+            "tags": tags,
+            "bnc": row["bnc"],
+            "frq": row["frq"],
+            "exchange": exchange,
+        }
+    finally:
+        conn.close()
+
+@app.get("/ecdict/{word}/translate")
+def ecdict_translate_sentence(word: str, sentence: str):
+    """查询单词翻译（用于例句中单词的悬停提示）"""
+    try:
+        conn = get_ecdict_conn()
+    except FileNotFoundError:
+        raise HTTPException(status_code=503, detail="ECDICT database not available")
+
+    try:
+        # 清理单词：去除标点、转小写
+        import re
+        clean_word = re.sub(r'[^a-zA-Z]', '', word).lower()
+        if not clean_word:
+            return {"word": word, "translation": ""}
+
+        cur = conn.cursor()
+        cur.execute("SELECT translation, pos FROM stardict WHERE word = ? COLLATE NOCASE", (clean_word,))
+        row = cur.fetchone()
+
+        if not row:
+            return {"word": clean_word, "translation": ""}
+
+        translation = row["translation"] or ""
+        # 只取第一个词性的释义作为简短提示
+        first_meaning = translation.split('\n')[0] if translation else ""
+        # 去掉词性前缀，只保留中文
+        first_meaning = re.sub(r'^[a-z]+\.\s*', '', first_meaning)
+
+        return {"word": clean_word, "translation": first_meaning}
+    finally:
+        conn.close()
+
+@app.post("/ecdict/translate-sentences")
+def ecdict_translate_sentences(request: dict):
+    """批量翻译例句：使用 argostranslate 离线神经机器翻译"""
+    sentences = request.get("sentences", [])
+    if not sentences:
+        return {"translations": []}
+
+    try:
+        from argostranslate import translate
+        translations = []
+        for sentence in sentences:
+            if not sentence or not sentence.strip():
+                translations.append("")
+                continue
+            try:
+                result = translate.translate(sentence.strip(), 'en', 'zh')
+                translations.append(result)
+            except Exception:
+                translations.append("")
+        return {"translations": translations}
+    except ImportError:
+        # argostranslate 未安装，回退到逐词翻译
+        try:
+            conn = get_ecdict_conn()
+        except FileNotFoundError:
+            raise HTTPException(status_code=503, detail="ECDICT database not available")
+
+        try:
+            import re
+            cur = conn.cursor()
+            translations = []
+            for sentence in sentences:
+                if not sentence or not sentence.strip():
+                    translations.append("")
+                    continue
+                words = re.findall(r'[a-zA-Z]+', sentence)
+                word_translations = []
+                for w in words:
+                    clean = w.lower()
+                    cur.execute("SELECT translation FROM stardict WHERE word = ? COLLATE NOCASE", (clean,))
+                    row = cur.fetchone()
+                    if row and row["translation"]:
+                        trans = row["translation"]
+                        first = trans.split('\n')[0]
+                        first = re.sub(r'^[a-z]+\.\s*', '', first)
+                        first = re.split(r'[;；,，]', first)[0].strip()
+                        if first:
+                            word_translations.append(first)
+                translations.append('；'.join(word_translations) if word_translations else "")
+            return {"translations": translations}
+        finally:
+            conn.close()
 
 @app.get("/voices")
 def list_voices():
