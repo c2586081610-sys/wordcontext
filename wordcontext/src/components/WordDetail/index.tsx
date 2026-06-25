@@ -17,8 +17,8 @@ function SpeakerIcon({ className = 'w-5 h-5' }: { className?: string }) {
 
 export function WordDetail() {
   const {
-    words, cards, currentIndex, setCurrentIndex,
-    detailSubMode, setDetailSubMode, rateWord, nextWord, prevWord,
+    displayWords, cards, currentIndex, setCurrentIndex,
+    detailSubMode, setDetailSubMode, rateWord, nextWord, prevWord, shuffleMode,
   } = useStudyStore();
 
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
@@ -27,7 +27,7 @@ export function WordDetail() {
   const [ecdictData, setEcdictData] = useState<ECDICTResult | null>(null);
   const [exampleTranslations, setExampleTranslations] = useState<string[]>([]);
 
-  const word = words[currentIndex];
+  const word = displayWords[currentIndex];
   const card = word ? cards.get(word.id) : null;
 
   // 查询 ECDICT 补充释义
@@ -57,7 +57,7 @@ export function WordDetail() {
     if (!word) return;
     const correct = definitions[0];
     if (!correct) return;
-    const others = words
+    const others = displayWords
       .filter(w => w.id !== word.id)
       .sort(() => Math.random() - 0.5)
       .slice(0, 3)
@@ -154,8 +154,15 @@ export function WordDetail() {
           ← 上一个
         </button>
 
-        <span className="text-sm text-slate-400 dark:text-slate-500">
-          {currentIndex + 1} / {words.length}
+        <span className="text-sm text-slate-400 dark:text-slate-500 flex items-center gap-2">
+          {currentIndex + 1} / {displayWords.length}
+          <span className={`text-xs px-1.5 py-0.5 rounded-md ${
+            shuffleMode === 'shuffle'
+              ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+              : 'bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
+          }`}>
+            {shuffleMode === 'shuffle' ? '乱序' : '顺序'}
+          </span>
         </span>
 
         <div className="flex items-center gap-2">

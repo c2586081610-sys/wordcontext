@@ -6,8 +6,9 @@ import { useEffect, useCallback, useState } from 'react';
 
 export function WordList() {
   const {
-    words, cards, currentIndex, setCurrentIndex,
+    displayWords, cards, currentIndex, setCurrentIndex,
     setViewMode, rateWord, showPhonetic, togglePhonetic,
+    decks, currentDeckId, shuffleMode,
   } = useStudyStore();
 
   const [hoveredRating, setHoveredRating] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export function WordList() {
       case 'j':
       case 'ArrowDown':
         e.preventDefault();
-        setCurrentIndex(Math.min(currentIndex + 1, words.length - 1));
+        setCurrentIndex(Math.min(currentIndex + 1, displayWords.length - 1));
         break;
       case 'k':
       case 'ArrowUp':
@@ -44,11 +45,11 @@ export function WordList() {
         break;
       case 'Enter':
         e.preventDefault();
-        const word = words[currentIndex];
+        const word = displayWords[currentIndex];
         if (word) speakWord(word.word);
         break;
     }
-  }, [currentIndex, words]);
+  }, [currentIndex, displayWords]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -56,7 +57,7 @@ export function WordList() {
   }, [handleKeyDown]);
 
   const handleRate = (rating: 'easy' | 'good' | 'again') => {
-    const word = words[currentIndex];
+    const word = displayWords[currentIndex];
     if (!word) return;
 
     setFlyOutIndex(currentIndex);
@@ -64,7 +65,7 @@ export function WordList() {
 
     setTimeout(() => {
       setFlyOutIndex(null);
-      if (currentIndex < words.length - 1) {
+      if (currentIndex < displayWords.length - 1) {
         setCurrentIndex(currentIndex + 1);
       }
     }, 250);
@@ -72,19 +73,26 @@ export function WordList() {
 
   // 显示当前词附近的词（前后各 5 个）
   const startIdx = Math.max(0, currentIndex - 5);
-  const endIdx = Math.min(words.length, currentIndex + 15);
-  const visibleWords = words.slice(startIdx, endIdx);
+  const endIdx = Math.min(displayWords.length, currentIndex + 15);
+  const visibleWords = displayWords.slice(startIdx, endIdx);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       {/* 顶部信息 */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-            CET4 核心词汇
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+            {currentDeckId === '__all' ? '全部词书' : decks.find(d => d.id === currentDeckId)?.name ?? '当前词书'}
+            <span className={`text-xs px-1.5 py-0.5 rounded-md font-normal ${
+              shuffleMode === 'shuffle'
+                ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400'
+                : 'bg-slate-100 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400'
+            }`}>
+              {shuffleMode === 'shuffle' ? '乱序' : '顺序'}
+            </span>
           </h2>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
-            Unit 1 · {words.length} 词
+            Unit 1 · {displayWords.length} 词
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -202,7 +210,7 @@ export function WordList() {
       {/* 底部统计 */}
       <div className="flex items-center justify-between mt-4 text-sm text-slate-500 dark:text-slate-400">
         <span>
-          当前第 <span className="text-blue-600 dark:text-blue-400 font-medium">{currentIndex + 1}</span> / {words.length} 词
+          当前第 <span className="text-blue-600 dark:text-blue-400 font-medium">{currentIndex + 1}</span> / {displayWords.length} 词
         </span>
         <div className="flex gap-4">
           <button
@@ -212,7 +220,7 @@ export function WordList() {
             ← 上一组
           </button>
           <button
-            onClick={() => setCurrentIndex(Math.min(words.length - 1, currentIndex + 10))}
+            onClick={() => setCurrentIndex(Math.min(displayWords.length - 1, currentIndex + 10))}
             className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
             下一组 →
