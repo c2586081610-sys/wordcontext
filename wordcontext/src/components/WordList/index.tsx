@@ -2,17 +2,23 @@ import { useStudyStore } from '../../stores/useStudyStore';
 import { PhonicsDisplay } from '../PhonicsDisplay';
 import { getMemoryStrength, getStateLabel } from '../../lib/fsrs';
 import { speakWord } from '../../lib/phonics';
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 
 export function WordList() {
   const {
     displayWords, cards, currentIndex, setCurrentIndex,
     setViewMode, rateWord, showPhonetic, togglePhonetic,
     decks, currentDeckId, shuffleMode,
+    hoverShowOptions, hoverAutoSpeak,
   } = useStudyStore();
 
   const [hoveredRating, setHoveredRating] = useState<string | null>(null);
   const [flyOutIndex, setFlyOutIndex] = useState<number | null>(null);
+  // 悬停状态：当前悬停的行索引
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  // 自动发音计时器 & 防重复标记
+  const speakTimerRef = useRef<number | null>(null);
+  const lastSpokenIdRef = useRef<string | null>(null);
 
   // 快捷键
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -56,20 +62,59 @@ export function WordList() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  const handleRate = (rating: 'easy' | 'good' | 'again') => {
-    const word = displayWords[currentIndex];
+  // 评价：可指定 wordIndex（用于悬停评价），默认当前词
+  const handleRate = (rating: 'easy' | 'good' | 'again', wordIndex: number = currentIndex) => {
+    const word = displayWords[wordIndex];
     if (!word) return;
 
-    setFlyOutIndex(currentIndex);
+    // 先选中该词，再执行评价（点击优先于悬停）
+    setCurrentIndex(wordIndex);
+    setFlyOutIndex(wordIndex);
     rateWord(word.id, rating);
 
     setTimeout(() => {
       setFlyOutIndex(null);
-      if (currentIndex < displayWords.length - 1) {
-        setCurrentIndex(currentIndex + 1);
+      if (wordIndex < displayWords.length - 1) {
+        setCurrentIndex(wordIndex + 1);
       }
     }, 250);
   };
+
+  // 鼠标悬停进入单词行：显示选项 + 触发自动发音（500ms 后，每次进入仅一次）
+  const handleRowEnter = (wordIndex: number) => {
+    const word = displayWords[wordIndex];
+    if (!word) return;
+
+    // 立即标记悬停，UI 即时显示选项（<300ms）
+    setHoveredIndex(wordIndex);
+
+    // 自动发音：500ms 延迟，避免误触；同一悬停会话仅触发一次
+    if (hoverAutoSpeak && lastSpokenIdRef.current !== word.id) {
+      if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = window.setTimeout(() => {
+        speakWord(word.word);
+        lastSpokenIdRef.current = word.id;
+        speakTimerRef.current = null;
+      }, 500);
+    }
+  };
+
+  // 鼠标离开单词行：清除悬停状态并取消待发音
+  const handleRowLeave = () => {
+    if (speakTimerRef.current) {
+      clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
+    }
+    lastSpokenIdRef.current = null; // 离开后重置，下次悬停可再次发音
+    setHoveredIndex(null);
+  };
+
+  // 组件卸载时清理计时器
+  useEffect(() => {
+    return () => {
+      if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+    };
+  }, []);
 
   // 显示当前词附近的词（前后各 5 个）
   const startIdx = Math.max(0, currentIndex - 5);
@@ -109,17 +154,23 @@ export function WordList() {
           const actualIndex = startIdx + i;
           const card = cards.get(word.id);
           const isActive = actualIndex === currentIndex;
+          const isHovered = hoveredIndex === actualIndex;
+          // 悬停显示选项：开启时按钮只跟鼠标走（悬停哪个显示哪个，点击不再常驻）；
+          // 关闭时回退为点击选中（active）才显示
+          const showRating = hoverShowOptions ? isHovered : isActive;
           const isFlyOut = flyOutIndex === actualIndex;
           const memoryStrength = card ? getMemoryStrength(card.fsrs) : 0;
 
           return (
             <div
               key={word.id}
-              className={`word-row flex items-center px-5 py-3 border-b border-slate-100/60 dark:border-slate-700/40 cursor-pointer
-                ${isActive ? 'bg-blue-50/80 dark:bg-blue-900/20 border-l-2 border-l-blue-500' : ''}
+              className={`word-row flex items-center px-5 py-3 border-b border-slate-100/60 dark:border-slate-700/40 cursor-pointer transition-colors duration-150
+                ${isActive ? 'bg-blue-50/80 dark:bg-blue-900/20 border-l-2 border-l-blue-500' : isHovered ? 'bg-slate-50/80 dark:bg-slate-700/20' : ''}
                 ${isFlyOut ? 'card-fly-out' : ''}
               `}
               onClick={() => setCurrentIndex(actualIndex)}
+              onMouseEnter={() => handleRowEnter(actualIndex)}
+              onMouseLeave={handleRowLeave}
             >
               {/* 单词 + 音标 */}
               <div className="flex-1 min-w-0">
@@ -173,11 +224,11 @@ export function WordList() {
                 </span>
               </div>
 
-              {/* 评价按钮（仅当前词显示） */}
-              {isActive && (
+              {/* 评价按钮（当前词或悬停时显示） */}
+              {showRating && (
                 <div className="flex items-center gap-1.5 card-slide-in">
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleRate('easy'); }}
+                    onClick={(e) => { e.stopPropagation(); handleRate('easy', actualIndex); }}
                     onMouseEnter={() => setHoveredRating('easy')}
                     onMouseLeave={() => setHoveredRating(null)}
                     className="rating-btn px-2.5 py-1.5 rounded-lg text-sm bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-900/50"
@@ -185,7 +236,7 @@ export function WordList() {
                     😊 熟悉
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleRate('good'); }}
+                    onClick={(e) => { e.stopPropagation(); handleRate('good', actualIndex); }}
                     onMouseEnter={() => setHoveredRating('good')}
                     onMouseLeave={() => setHoveredRating(null)}
                     className="rating-btn px-2.5 py-1.5 rounded-lg text-sm bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50"
@@ -193,7 +244,7 @@ export function WordList() {
                     😐 模糊
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleRate('again'); }}
+                    onClick={(e) => { e.stopPropagation(); handleRate('again', actualIndex); }}
                     onMouseEnter={() => setHoveredRating('again')}
                     onMouseLeave={() => setHoveredRating(null)}
                     className="rating-btn px-2.5 py-1.5 rounded-lg text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"

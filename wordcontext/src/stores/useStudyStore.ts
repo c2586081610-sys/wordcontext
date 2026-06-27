@@ -26,6 +26,8 @@ interface StudyState {
   isInitialized: boolean;
   theme: ThemeMode;
   resolvedTheme: 'light' | 'dark';
+  hoverShowOptions: boolean;   // 鼠标悬停显示评价选项
+  hoverAutoSpeak: boolean;     // 鼠标悬停自动发音
 
   // 操作
   init: () => Promise<void>;
@@ -35,6 +37,8 @@ interface StudyState {
   setCurrentDeckId: (deckId: string) => void;
   toggleShuffle: () => void;
   togglePhonetic: () => void;
+  setHoverShowOptions: (v: boolean) => void;
+  setHoverAutoSpeak: (v: boolean) => void;
   nextWord: () => void;
   prevWord: () => void;
   rateWord: (wordId: string, rating: ReviewRating) => void;
@@ -61,6 +65,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   isInitialized: false,
   theme: 'system' as ThemeMode,
   resolvedTheme: (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' as const : 'light' as const,
+  hoverShowOptions: (() => {
+    try { return localStorage.getItem('wc_hoverShowOptions') !== 'false'; } catch { return true; }
+  })(),
+  hoverAutoSpeak: (() => {
+    try { return localStorage.getItem('wc_hoverAutoSpeak') !== 'false'; } catch { return true; }
+  })(),
 
   init: async () => {
     if (get().isInitialized) return;
@@ -138,6 +148,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   togglePhonetic: () => set((s) => ({ showPhonetic: !s.showPhonetic })),
+
+  setHoverShowOptions: (v) => {
+    try { localStorage.setItem('wc_hoverShowOptions', String(v)); } catch { /* ignore */ }
+    set({ hoverShowOptions: v });
+  },
+
+  setHoverAutoSpeak: (v) => {
+    try { localStorage.setItem('wc_hoverAutoSpeak', String(v)); } catch { /* ignore */ }
+    set({ hoverAutoSpeak: v });
+  },
 
   nextWord: () => {
     const { currentIndex, displayWords } = get();

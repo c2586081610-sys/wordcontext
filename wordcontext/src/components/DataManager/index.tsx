@@ -7,7 +7,11 @@ type ExportFormat = 'json' | 'csv';
 type ExportScope = 'all' | 'deck';
 
 export function DataManager() {
-  const { init } = useStudyStore();
+  const {
+    init,
+    hoverShowOptions, hoverAutoSpeak,
+    setHoverShowOptions, setHoverAutoSpeak,
+  } = useStudyStore();
 
   // 导出状态
   const [exportFormat, setExportFormat] = useState<ExportFormat>('json');
@@ -126,6 +130,32 @@ export function DataManager() {
         <h1 className="text-2xl font-bold text-slate-800">数据管理</h1>
         <p className="text-sm text-slate-500 mt-1">导入、导出和管理你的词库数据</p>
       </div>
+
+      {/* 学习偏好 */}
+      <section className="glass rounded-2xl p-6 space-y-5">
+        <div className="flex items-center gap-2">
+          <svg className="w-5 h-5 text-violet-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <h2 className="text-lg font-semibold text-slate-800">学习偏好</h2>
+        </div>
+
+        <div className="space-y-4">
+          <PreferenceToggle
+            label="鼠标悬停显示选项"
+            desc="在速刷页面中，鼠标悬停单词行时立即显示「熟悉/模糊/忘记」评价按钮"
+            checked={hoverShowOptions}
+            onChange={setHoverShowOptions}
+          />
+          <PreferenceToggle
+            label="鼠标悬停自动发音"
+            desc="鼠标悬停单词 500ms 后自动播放该单词发音（每次悬停仅触发一次）"
+            checked={hoverAutoSpeak}
+            onChange={setHoverAutoSpeak}
+          />
+        </div>
+      </section>
 
       {/* 导出区域 */}
       <section className="glass rounded-2xl p-6 space-y-5">
@@ -397,5 +427,36 @@ function ScopeButton({ active, onClick, label }: {
     >
       {label}
     </button>
+  );
+}
+
+// 学习偏好开关
+function PreferenceToggle({ label, desc, checked, onChange }: {
+  label: string;
+  desc: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-1">
+      <div className="flex-1">
+        <p className="text-sm font-medium text-slate-700">{label}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{desc}</p>
+      </div>
+      <button
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30 ${
+          checked ? 'bg-violet-600' : 'bg-slate-300'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
   );
 }
