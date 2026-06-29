@@ -4,7 +4,7 @@ import { SAMPLE_WORDS, SAMPLE_DECKS } from '../lib/db/sampleData';
 import { newCard, scheduleReview, scheduleReviewWithLog, checkAndTrainIfNeeded, loadFSRSParameters, type ReviewRating } from '../lib/fsrs';
 import { createEmptyCard, State } from 'ts-fsrs';
 
-type ViewMode = 'list' | 'detail' | 'stats' | 'settings';
+type ViewMode = 'home' | 'list' | 'detail' | 'stats' | 'settings' | 'review';
 type DetailSubMode = 'quiz' | 'rate';
 type ThemeMode = 'light' | 'dark' | 'system';
 type ShuffleMode = 'order' | 'shuffle';
@@ -29,6 +29,10 @@ interface StudyState {
   hoverShowOptions: boolean;   // 鼠标悬停显示评价选项
   hoverAutoSpeak: boolean;     // 鼠标悬停自动发音
 
+  // 复习模式状态
+  reviewIndex: number;          // 复习模式当前索引
+  reviewFilter: 'all' | 'newOnly'; // 速刷模式筛选（全部/仅新词）
+
   // 操作
   init: () => Promise<void>;
   setViewMode: (mode: ViewMode) => void;
@@ -39,6 +43,9 @@ interface StudyState {
   togglePhonetic: () => void;
   setHoverShowOptions: (v: boolean) => void;
   setHoverAutoSpeak: (v: boolean) => void;
+  setReviewIndex: (index: number) => void;
+  setReviewFilter: (filter: 'all' | 'newOnly') => void;
+  goHome: () => void;
   nextWord: () => void;
   prevWord: () => void;
   rateWord: (wordId: string, rating: ReviewRating) => void;
@@ -56,9 +63,16 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   displayWords: [],
   cards: new Map(),
   decks: [],
-  currentDeckId: 'deck-cet4',
-  shuffleMode: 'order',
-  viewMode: 'list',
+  currentDeckId: (() => {
+    try { return localStorage.getItem('wc_currentDeckId') || '__all'; } catch { return '__all'; }
+  })(),
+  shuffleMode: (() => {
+    try {
+      const saved = localStorage.getItem('wc_shuffleMode');
+      return saved === 'shuffle' ? 'shuffle' : 'order';
+    } catch { return 'order'; }
+  })() as 'order' | 'shuffle',
+  viewMode: 'home' as ViewMode,
   detailSubMode: 'rate',
   currentIndex: 0,
   showPhonetic: true,
@@ -71,6 +85,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   hoverAutoSpeak: (() => {
     try { return localStorage.getItem('wc_hoverAutoSpeak') !== 'false'; } catch { return true; }
   })(),
+  reviewIndex: 0,
+  reviewFilter: 'all' as const,
 
   init: async () => {
     if (get().isInitialized) return;
@@ -81,7 +97,11 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     // 检查是否已有数据
     const existingWords = await db.words.count();
     if (existingWords === 0) {
-      // 写入示例数据（bulkPut 避免重复插入报错）
+      // 首次启动：写入全部示例数据
+      await db.words.bulkPut(SAMPLE_WORDS);
+      await db.decks.bulkPut(SAMPLE_DECKS);
+    } else if (existingWords < SAMPLE_WORDS.length) {
+      // 非首次但词数不足：补写缺失的词和 deck（bulkPut 是 upsert，不会重复）
       await db.words.bulkPut(SAMPLE_WORDS);
       await db.decks.bulkPut(SAMPLE_DECKS);
     }
@@ -97,30 +117,36 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     for (const word of allWords) {
       if (!cardMap.has(word.id)) {
         const fsrsCard = newCard();
+        // 查找该词属于哪个 deck
+        const belongsToDeck = allDecks.find(d => d.wordIds.includes(word.id));
         const cardEntry: CardEntry = {
           id: word.id,
-          deckId: 'deck-cet4',
+          deckId: belongsToDeck?.id ?? 'deck-cet4',
           fsrs: fsrsCard,
           rating: 0,
         };
-        await db.cards.add(cardEntry);
+        await db.cards.put(cardEntry);
         cardMap.set(word.id, cardEntry);
       }
     }
 
-    // 按当前 deck 过滤词(默认 deck-cet4)
-    const deckId = get().currentDeckId;
-    const words = deckId === '__all'
+    // 校验持久化的 currentDeckId 是否有效
+    const persistedDeckId = get().currentDeckId;
+    const validDeckId = persistedDeckId === '__all' || allDecks.some(d => d.id === persistedDeckId)
+      ? persistedDeckId
+      : '__all';
+    const words = validDeckId === '__all'
       ? allWords
-      : filterByDeck(allWords, allDecks, deckId);
+      : filterByDeck(allWords, allDecks, validDeckId);
 
     // 根据当前 shuffleMode 派生 displayWords
     const displayWords = get().shuffleMode === 'shuffle' ? shuffleArray(words) : words;
 
-    set({ words, displayWords, cards: cardMap, decks: allDecks, isInitialized: true });
+    set({ words, displayWords, cards: cardMap, decks: allDecks, currentDeckId: validDeckId, isInitialized: true });
   },
 
   setCurrentDeckId: (deckId) => {
+    try { localStorage.setItem('wc_currentDeckId', deckId); } catch { /* ignore */ }
     const { decks, shuffleMode } = get();
     // 切换词书时需要从原始 db 重新拉
     db.words.toArray().then(allDbWords => {
@@ -135,6 +161,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   toggleShuffle: () => {
     const { shuffleMode, words } = get();
     const nextMode: ShuffleMode = shuffleMode === 'order' ? 'shuffle' : 'order';
+    try { localStorage.setItem('wc_shuffleMode', nextMode); } catch { /* ignore */ }
     const displayWords = nextMode === 'shuffle' ? shuffleArray(words) : words;
     set({ shuffleMode: nextMode, displayWords, currentIndex: 0 });
   },
@@ -157,6 +184,14 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setHoverAutoSpeak: (v) => {
     try { localStorage.setItem('wc_hoverAutoSpeak', String(v)); } catch { /* ignore */ }
     set({ hoverAutoSpeak: v });
+  },
+
+  setReviewIndex: (index) => set({ reviewIndex: Math.max(0, index) }),
+
+  setReviewFilter: (filter) => set({ reviewFilter: filter, currentIndex: 0 }),
+
+  goHome: () => {
+    set({ viewMode: 'home', reviewFilter: 'all' });
   },
 
   nextWord: () => {
@@ -245,7 +280,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     const now = new Date();
     return displayWords.filter(w => {
       const card = cards.get(w.id);
-      return card && new Date(card.fsrs.due) <= now;
+      return card && new Date(card.fsrs.due) <= now && card.fsrs.state !== 0;
     });
   },
 

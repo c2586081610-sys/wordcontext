@@ -75,8 +75,9 @@ export function DataManager() {
       setImportResult(result);
       setPendingFile(null);
       if (result.success) {
-        // 刷新 store
-        await init();
+        // 导入成功后强制刷新：绕过 isInitialized 守卫，重新从 IndexedDB 加载
+        useStudyStore.setState({ isInitialized: false });
+        await useStudyStore.getState().init();
       }
     } catch (err) {
       setImportResult({

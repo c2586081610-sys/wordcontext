@@ -10,7 +10,11 @@ export function WordList() {
     setViewMode, rateWord, showPhonetic, togglePhonetic,
     decks, currentDeckId, shuffleMode,
     hoverShowOptions, hoverAutoSpeak,
+    reviewFilter, setReviewFilter,
+    getStats,
   } = useStudyStore();
+
+  const stats = getStats();
 
   const [hoveredRating, setHoveredRating] = useState<string | null>(null);
   const [flyOutIndex, setFlyOutIndex] = useState<number | null>(null);
@@ -20,13 +24,21 @@ export function WordList() {
   const speakTimerRef = useRef<number | null>(null);
   const lastSpokenIdRef = useRef<string | null>(null);
 
+  // 根据 reviewFilter 筛选（newOnly: 仅新词；all: 全部）
+  const filteredWords = reviewFilter === 'newOnly'
+    ? displayWords.filter(w => {
+        const card = cards.get(w.id);
+        return card && card.fsrs.state === 0;
+      })
+    : displayWords;
+
   // 快捷键
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     switch (e.key) {
       case 'j':
       case 'ArrowDown':
         e.preventDefault();
-        setCurrentIndex(Math.min(currentIndex + 1, displayWords.length - 1));
+        setCurrentIndex(Math.min(currentIndex + 1, filteredWords.length - 1));
         break;
       case 'k':
       case 'ArrowUp':
@@ -51,11 +63,11 @@ export function WordList() {
         break;
       case 'Enter':
         e.preventDefault();
-        const word = displayWords[currentIndex];
+        const word = filteredWords[currentIndex];
         if (word) speakWord(word.word);
         break;
     }
-  }, [currentIndex, displayWords]);
+  }, [currentIndex, filteredWords]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -64,7 +76,7 @@ export function WordList() {
 
   // 评价：可指定 wordIndex（用于悬停评价），默认当前词
   const handleRate = (rating: 'easy' | 'good' | 'again', wordIndex: number = currentIndex) => {
-    const word = displayWords[wordIndex];
+    const word = filteredWords[wordIndex];
     if (!word) return;
 
     // 先选中该词，再执行评价（点击优先于悬停）
@@ -74,7 +86,7 @@ export function WordList() {
 
     setTimeout(() => {
       setFlyOutIndex(null);
-      if (wordIndex < displayWords.length - 1) {
+      if (wordIndex < filteredWords.length - 1) {
         setCurrentIndex(wordIndex + 1);
       }
     }, 250);
@@ -82,7 +94,7 @@ export function WordList() {
 
   // 鼠标悬停进入单词行：显示选项 + 触发自动发音（500ms 后，每次进入仅一次）
   const handleRowEnter = (wordIndex: number) => {
-    const word = displayWords[wordIndex];
+    const word = filteredWords[wordIndex];
     if (!word) return;
 
     // 立即标记悬停，UI 即时显示选项（<300ms）
@@ -118,8 +130,8 @@ export function WordList() {
 
   // 显示当前词附近的词（前后各 5 个）
   const startIdx = Math.max(0, currentIndex - 5);
-  const endIdx = Math.min(displayWords.length, currentIndex + 15);
-  const visibleWords = displayWords.slice(startIdx, endIdx);
+  const endIdx = Math.min(filteredWords.length, currentIndex + 15);
+  const visibleWords = filteredWords.slice(startIdx, endIdx);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -137,7 +149,7 @@ export function WordList() {
             </span>
           </h2>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
-            Unit 1 · {displayWords.length} 词
+            Unit 1 · {filteredWords.length} 词
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
@@ -145,6 +157,41 @@ export function WordList() {
           <span className="kbd ml-2">1</span><span className="kbd">2</span><span className="kbd">3</span> 评价
           <span className="kbd ml-2">Space</span> 释义
           <span className="kbd ml-2">Enter</span> 发音
+        </div>
+      </div>
+
+      {/* 今日新词入口 */}
+      <div
+        onClick={() => setReviewFilter(reviewFilter === 'newOnly' ? 'all' : 'newOnly')}
+        className={`mb-4 p-4 rounded-2xl cursor-pointer transition-all ${
+          reviewFilter === 'newOnly'
+            ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700'
+            : 'glass border-2 border-transparent hover:border-slate-200 dark:hover:border-slate-700'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              reviewFilter === 'newOnly' ? 'bg-blue-500 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+            }`}>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                {reviewFilter === 'newOnly' ? '正在学习新词' : '今日新词'}
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {stats.newCount > 0 ? `${stats.newCount} 个新词待学习` : '全部已学完'}
+              </p>
+            </div>
+          </div>
+          {reviewFilter === 'newOnly' ? (
+            <span className="text-xs text-blue-500 font-medium">点击查看全部</span>
+          ) : stats.newCount > 0 ? (
+            <span className="text-xs text-blue-500 font-medium">点击筛选 →</span>
+          ) : null}
         </div>
       </div>
 
@@ -261,7 +308,7 @@ export function WordList() {
       {/* 底部统计 */}
       <div className="flex items-center justify-between mt-4 text-sm text-slate-500 dark:text-slate-400">
         <span>
-          当前第 <span className="text-blue-600 dark:text-blue-400 font-medium">{currentIndex + 1}</span> / {displayWords.length} 词
+          当前第 <span className="text-blue-600 dark:text-blue-400 font-medium">{currentIndex + 1}</span> / {filteredWords.length} 词
         </span>
         <div className="flex gap-4">
           <button
@@ -271,7 +318,7 @@ export function WordList() {
             ← 上一组
           </button>
           <button
-            onClick={() => setCurrentIndex(Math.min(displayWords.length - 1, currentIndex + 10))}
+            onClick={() => setCurrentIndex(Math.min(filteredWords.length - 1, currentIndex + 10))}
             className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
             下一组 →

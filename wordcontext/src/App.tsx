@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { Header } from './components/Header';
+import { HomePage } from './components/HomePage';
 import { WordList } from './components/WordList';
 import { WordDetail } from './components/WordDetail';
 import { DataManager } from './components/DataManager';
 import { StatsPanel } from './components/StatsPanel';
+import { ReviewMode } from './components/ReviewMode';
 import { useStudyStore } from './stores/useStudyStore';
 
 export default function App() {
@@ -55,8 +57,10 @@ export default function App() {
     <div className="min-h-screen bg-[var(--color-bg-light)] dark:bg-[var(--color-bg-dark)] transition-colors duration-300">
       <Header />
       <main className="pb-12">
+        {viewMode === 'home' && <HomePage />}
         {viewMode === 'list' && <WordList />}
         {viewMode === 'detail' && <WordDetail />}
+        {viewMode === 'review' && <ReviewMode />}
         {viewMode === 'stats' && <StatsPanel />}
         {viewMode === 'settings' && <DataManager />}
       </main>
