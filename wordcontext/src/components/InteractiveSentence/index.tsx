@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { lookupWordTranslation } from '../../lib/ecdict';
 import { useStudyStore } from '../../stores/useStudyStore';

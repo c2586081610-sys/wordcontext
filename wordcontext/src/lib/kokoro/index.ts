@@ -149,7 +149,7 @@ export async function speakSyllable(
         return
       }
     } catch (e) {
-      return null
+      return
     }
   }
 

@@ -1,12 +1,12 @@
-import { createEmptyCard, fsrs, Rating, State, generatorParameters, type FSRSParameters, type Card } from 'ts-fsrs';
-import { db, type StudyLog, type SettingsEntry } from '../db';
+import { createEmptyCard, fsrs, Rating, State, generatorParameters, type FSRSParameters, type Card, type Grade } from 'ts-fsrs';
+import { db, type SettingsEntry } from '../db';
 
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy';
 
-// ts-fsrs 的 Card 类型（从 createEmptyCard 推断）
-export type FSRSCard = ReturnType<typeof createEmptyCard>;
+// ts-fsrs 的 Card 类型
+export type FSRSCard = Card;
 
-const RATING_MAP: Record<ReviewRating, Rating> = {
+const RATING_MAP: Record<ReviewRating, Grade> = {
   again: Rating.Again,
   hard: Rating.Hard,
   good: Rating.Good,

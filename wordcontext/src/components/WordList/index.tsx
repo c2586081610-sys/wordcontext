@@ -1,5 +1,4 @@
 import { useStudyStore } from '../../stores/useStudyStore';
-import { PhonicsDisplay } from '../PhonicsDisplay';
 import { getMemoryStrength, getStateLabel } from '../../lib/fsrs';
 import { speakWord } from '../../lib/phonics';
 import { useEffect, useCallback, useState, useRef } from 'react';
@@ -7,7 +6,7 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 export function WordList() {
   const {
     displayWords, cards, currentIndex, setCurrentIndex,
-    setViewMode, rateWord, showPhonetic, togglePhonetic,
+    rateWord, showPhonetic, togglePhonetic,
     decks, currentDeckId, shuffleMode,
     hoverShowOptions, hoverAutoSpeak,
     reviewFilter, setReviewFilter,

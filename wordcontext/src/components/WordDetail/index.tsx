@@ -17,7 +17,7 @@ function SpeakerIcon({ className = 'w-5 h-5' }: { className?: string }) {
 
 export function WordDetail() {
   const {
-    displayWords, cards, currentIndex, setCurrentIndex,
+    displayWords, cards, currentIndex,
     detailSubMode, setDetailSubMode, rateWord, nextWord, prevWord, shuffleMode,
   } = useStudyStore();
 
@@ -294,9 +294,9 @@ export function WordDetail() {
               </div>
             ))}
             {/* ECDICT 英文释义 */}
-            {ecdictData?.definitions_en?.length > 0 && (
+            {(ecdictData?.definitions_en?.length ?? 0) > 0 && (
               <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                {ecdictData.definitions_en.map((d, i) => (
+                {ecdictData?.definitions_en?.map((d, i) => (
                   <div key={i} className="text-sm text-slate-500 dark:text-slate-400">
                     <span className="text-slate-400 dark:text-slate-500 mr-2">{d.pos}</span>
                     {d.meaning}

@@ -71,8 +71,6 @@ export function Header() {
   const themeIcon = theme === 'light' ? <SunIcon /> : theme === 'dark' ? <MoonIcon /> : <SystemIcon />;
   const themeLabel = theme === 'light' ? '浅色' : theme === 'dark' ? '深色' : '跟随系统';
 
-  const currentDeck = currentDeckId === '__all' ? null : decks.find(d => d.id === currentDeckId);
-  const deckLabel = currentDeckId === '__all' ? '全部词书' : currentDeck?.name ?? '当前词书';
   const shuffleLabel = shuffleMode === 'order' ? '顺序学习' : '乱序学习';
 
   return (

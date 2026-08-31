@@ -12,7 +12,6 @@ import {
   Cell,
   BarChart,
   Bar,
-  Legend,
 } from 'recharts';
 import { useStatStore } from '../../stores/useStatStore';
 import { useStudyStore } from '../../stores/useStudyStore';

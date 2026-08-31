@@ -1,8 +1,7 @@
 import { create } from 'zustand';
 import { db, type WordEntry, type CardEntry, type DeckEntry } from '../lib/db';
 import { SAMPLE_WORDS, SAMPLE_DECKS } from '../lib/db/sampleData';
-import { newCard, scheduleReview, scheduleReviewWithLog, checkAndTrainIfNeeded, loadFSRSParameters, type ReviewRating } from '../lib/fsrs';
-import { createEmptyCard, State } from 'ts-fsrs';
+import { newCard, scheduleReviewWithLog, checkAndTrainIfNeeded, loadFSRSParameters, type ReviewRating } from '../lib/fsrs';
 
 type ViewMode = 'home' | 'list' | 'detail' | 'stats' | 'settings' | 'review';
 type DetailSubMode = 'quiz' | 'rate';

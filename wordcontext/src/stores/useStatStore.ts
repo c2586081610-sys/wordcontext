@@ -1,5 +1,15 @@
 import { create } from 'zustand';
-import { db, type DailyStatEntry, type StudyLog } from '../lib/db';
+import { db, type StudyLog } from '../lib/db';
+
+export type DailyStatEntry = {
+  id: string;                 // 日期 "2026-06-07"
+  date: string;
+  newWordsLearned: number;
+  wordsReviewed: number;
+  totalReviews: number;
+  correctRate: number;
+  studyMinutes: number;
+};
 
 interface DailyGoal {
   newWords: number;   // 每日新词目标
