@@ -33,11 +33,10 @@ wordcontext/tts-service/stardict.db
 # Unrelated project workspace
 work/
 
-# NCE1 词库数据文件（数据已导入 IndexedDB，源文件仅本地保留）
+# NCE1 词库原始 JSON（nce1Data.ts 为构建期依赖，必须纳入版本控制）
 wordcontext/src/lib/db/nce1-words.json
 wordcontext/src/lib/db/nce1-words-by-lesson.json
 wordcontext/src/lib/db/nce1-importable.json
-wordcontext/src/lib/db/nce1Data.ts
 
 # Personal notes
 提问
